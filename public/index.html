@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>信息登记与查询</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6f9;color:#243147;font:16px/1.6 system-ui,sans-serif}main{max-width:960px;margin:40px auto;padding:0 20px}h1{font-size:28px;margin-bottom:4px}h2{font-size:20px;margin-top:0}.muted{color:#64748b}section{background:white;border:1px solid #e1e6ee;border-radius:12px;padding:24px;margin:24px 0}form{display:grid;grid-template-columns:1fr 1fr;gap:18px}label{display:block}input{width:100%;padding:11px;border:1px solid #aab6c6;border-radius:6px;font:inherit;margin-top:6px}input:focus-visible,button:focus-visible{outline:3px solid #93b8fd;outline-offset:2px}button{background:#245dc9;color:white;border:0;border-radius:6px;padding:11px 20px;font:inherit;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.actions{grid-column:1/-1}.bar{display:flex;align-items:center;gap:16px;justify-content:space-between}.bar input{max-width:380px;margin:0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;margin-top:20px;text-align:left}th,td{padding:12px;border-bottom:1px solid #e5e9ef;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#f8fafc}#message{min-height:26px;white-space:pre-wrap}.error{color:#b42318}.success{color:#147344}@media(max-width:600px){main{margin:24px auto}form{grid-template-columns:1fr}section{padding:18px}.bar{align-items:stretch;flex-direction:column}.bar input{max-width:none}}
+</style>
+</head>
+<body><main>
+<h1>信息登记与查询</h1><p class="muted">填写并提交新信息，或搜索已登记的数据。已有记录提交后不能修改或删除。</p>
+<section aria-labelledby="add-title"><h2 id="add-title">新增信息</h2><form id="form"><div id="fields" style="display:contents"></div><div class="actions"><button id="submit" type="submit">提交信息</button></div></form></section>
+<p id="message" role="status" aria-live="polite"></p>
+<section aria-labelledby="list-title"><h2 id="list-title">数据列表</h2><div class="bar"><input id="search" type="search" aria-label="搜索全部字段" placeholder="输入关键词搜索"><button id="refresh" type="button">刷新列表</button></div><p id="count" class="muted"></p><div class="table-wrap"><table><thead><tr id="head"></tr></thead><tbody id="rows"></tbody></table></div></section>
+</main><script>
+'use strict';
+// 同域 Vercel API，无需修改地址；不要在此添加任何密钥。
+const CONFIG = { apiUrl: '/api/data', fields: [
+  {key:'name',label:'姓名',max:80,autocomplete:'name'},
+  {key:'phone',label:'电话',max:40,autocomplete:'tel',type:'tel'}
+] };
+const $ = id => document.getElementById(id);
+let rows = [], loaded = false, loading = false;
+for(const field of CONFIG.fields){
+  const label=document.createElement('label');label.textContent=field.label+'（必填）';
+  const input=document.createElement('input');Object.assign(input,{name:field.key,required:true,maxLength:field.max,type:field.type||'text',autocomplete:field.autocomplete||'off'});label.append(input);$('fields').append(label);
+  const th=document.createElement('th');th.scope='col';th.textContent=field.label;$('head').append(th);
+}
+function message(text,error=false){$('message').textContent=text;$('message').className=error?'error':'success'}
+async function api(action,data){
+  if(CONFIG.apiUrl.includes('替换'))throw new Error('请先配置服务接口地址，再使用页面。');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await fetch(CONFIG.apiUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...(data?{data}:{})}),signal:controller.signal});
+    let result;try{result=await response.json()}catch{throw new Error('接口返回异常，请联系管理员检查 API 配置。')}
+    if(!response.ok||!result.ok)throw new Error(result.message||'请求失败，请稍后再试。');return result;
+  }catch(error){if(error.name==='AbortError'||error instanceof TypeError)throw new Error('网络异常或请求超时。提交结果可能已保存，请先刷新查询，避免重复提交。');throw error}finally{clearTimeout(timer)}
+}
+function render(){
+  const keyword=$('search').value.trim().toLocaleLowerCase();
+  const filtered=rows.filter(row=>CONFIG.fields.some(field=>String(row[field.key]||'').toLocaleLowerCase().includes(keyword)));
+  $('rows').replaceChildren();$('count').textContent=loaded?`共 ${rows.length} 条，当前显示 ${filtered.length} 条`: '尚未获取数据';
+  if(!filtered.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=CONFIG.fields.length;td.textContent=loaded?(keyword?'没有匹配的记录':'暂无数据'):'请刷新列表获取数据';tr.append(td);$('rows').append(tr)}
+  for(const row of filtered){const tr=document.createElement('tr');for(const field of CONFIG.fields){const td=document.createElement('td');td.textContent=row[field.key]??'';tr.append(td)}$('rows').append(tr)}
+}
+async function refresh(){
+  if(loading)return;loading=true;$('refresh').disabled=true;$('refresh').textContent='加载中…';
+  try{const result=await api('list');if(!Array.isArray(result.rows))throw new Error('列表数据格式异常');rows=result.rows;loaded=true;render()}
+  finally{loading=false;$('refresh').disabled=false;$('refresh').textContent='刷新列表'}
+}
+$('form').addEventListener('submit',async event=>{
+  event.preventDefault();if($('submit').disabled||loading)return;
+  const data=Object.fromEntries(CONFIG.fields.map(field=>[field.key,$('form').elements[field.key].value.trim()]));
+  if(Object.values(data).some(value=>!value)){message('请填写所有必填字段。',true);return}
+  $('submit').disabled=true;message('正在提交…');
+  try{await api('add',data);$('form').reset();message('提交成功。');try{await refresh()}catch(error){message('提交已成功，但列表刷新失败：'+error.message,true)}}catch(error){message(error.message,true)}finally{$('submit').disabled=false}
+});
+$('search').addEventListener('input',render);
+$('refresh').addEventListener('click',()=>{message('');refresh().catch(error=>message(error.message,true))});
+render();refresh().catch(error=>message(error.message,true));
+</script></body></html>
