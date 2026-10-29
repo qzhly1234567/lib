@@ -1,61 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>信息登记与查询</title>
-<style>
-*{box-sizing:border-box}body{margin:0;background:#f4f6f9;color:#243147;font:16px/1.6 system-ui,sans-serif}main{max-width:960px;margin:40px auto;padding:0 20px}h1{font-size:28px;margin-bottom:4px}h2{font-size:20px;margin-top:0}.muted{color:#64748b}section{background:white;border:1px solid #e1e6ee;border-radius:12px;padding:24px;margin:24px 0}form{display:grid;grid-template-columns:1fr 1fr;gap:18px}label{display:block}input{width:100%;padding:11px;border:1px solid #aab6c6;border-radius:6px;font:inherit;margin-top:6px}input:focus-visible,button:focus-visible{outline:3px solid #93b8fd;outline-offset:2px}button{background:#245dc9;color:white;border:0;border-radius:6px;padding:11px 20px;font:inherit;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.actions{grid-column:1/-1}.bar{display:flex;align-items:center;gap:16px;justify-content:space-between}.bar input{max-width:380px;margin:0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;margin-top:20px;text-align:left}th,td{padding:12px;border-bottom:1px solid #e5e9ef;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#f8fafc}#message{min-height:26px;white-space:pre-wrap}.error{color:#b42318}.success{color:#147344}@media(max-width:600px){main{margin:24px auto}form{grid-template-columns:1fr}section{padding:18px}.bar{align-items:stretch;flex-direction:column}.bar input{max-width:none}}
-</style>
-</head>
-<body><main>
-<h1>信息登记与查询</h1><p class="muted">填写并提交新信息，或搜索已登记的数据。已有记录提交后不能修改或删除。</p>
-<section aria-labelledby="add-title"><h2 id="add-title">新增信息</h2><form id="form"><div id="fields" style="display:contents"></div><div class="actions"><button id="submit" type="submit">提交信息</button></div></form></section>
-<p id="message" role="status" aria-live="polite"></p>
-<section aria-labelledby="list-title"><h2 id="list-title">数据列表</h2><div class="bar"><input id="search" type="search" aria-label="搜索全部字段" placeholder="输入关键词搜索"><button id="refresh" type="button">刷新列表</button></div><p id="count" class="muted"></p><div class="table-wrap"><table><thead><tr id="head"></tr></thead><tbody id="rows"></tbody></table></div></section>
-</main><script>
-'use strict';
-// 同域 Vercel API，无需修改地址；不要在此添加任何密钥。
-const CONFIG = { apiUrl: '/api/data', fields: [
-  {key:'name',label:'姓名',max:80,autocomplete:'name'},
-  {key:'phone',label:'电话',max:40,autocomplete:'tel',type:'tel'}
-] };
-const $ = id => document.getElementById(id);
-let rows = [], loaded = false, loading = false;
-for(const field of CONFIG.fields){
-  const label=document.createElement('label');label.textContent=field.label+'（必填）';
-  const input=document.createElement('input');Object.assign(input,{name:field.key,required:true,maxLength:field.max,type:field.type||'text',autocomplete:field.autocomplete||'off'});label.append(input);$('fields').append(label);
-  const th=document.createElement('th');th.scope='col';th.textContent=field.label;$('head').append(th);
-}
-function message(text,error=false){$('message').textContent=text;$('message').className=error?'error':'success'}
-async function api(action,data){
-  if(CONFIG.apiUrl.includes('替换'))throw new Error('请先配置服务接口地址，再使用页面。');
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-  try{
-    const response=await fetch(CONFIG.apiUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...(data?{data}:{})}),signal:controller.signal});
-    let result;try{result=await response.json()}catch{throw new Error('接口返回异常，请联系管理员检查 API 配置。')}
-    if(!response.ok||!result.ok)throw new Error(result.message||'请求失败，请稍后再试。');return result;
-  }catch(error){if(error.name==='AbortError'||error instanceof TypeError)throw new Error('网络异常或请求超时。提交结果可能已保存，请先刷新查询，避免重复提交。');throw error}finally{clearTimeout(timer)}
-}
-function render(){
-  const keyword=$('search').value.trim().toLocaleLowerCase();
-  const filtered=rows.filter(row=>CONFIG.fields.some(field=>String(row[field.key]||'').toLocaleLowerCase().includes(keyword)));
-  $('rows').replaceChildren();$('count').textContent=loaded?`共 ${rows.length} 条，当前显示 ${filtered.length} 条`: '尚未获取数据';
-  if(!filtered.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=CONFIG.fields.length;td.textContent=loaded?(keyword?'没有匹配的记录':'暂无数据'):'请刷新列表获取数据';tr.append(td);$('rows').append(tr)}
-  for(const row of filtered){const tr=document.createElement('tr');for(const field of CONFIG.fields){const td=document.createElement('td');td.textContent=row[field.key]??'';tr.append(td)}$('rows').append(tr)}
-}
-async function refresh(){
-  if(loading)return;loading=true;$('refresh').disabled=true;$('refresh').textContent='加载中…';
-  try{const result=await api('list');if(!Array.isArray(result.rows))throw new Error('列表数据格式异常');rows=result.rows;loaded=true;render()}
-  finally{loading=false;$('refresh').disabled=false;$('refresh').textContent='刷新列表'}
-}
-$('form').addEventListener('submit',async event=>{
-  event.preventDefault();if($('submit').disabled||loading)return;
-  const data=Object.fromEntries(CONFIG.fields.map(field=>[field.key,$('form').elements[field.key].value.trim()]));
-  if(Object.values(data).some(value=>!value)){message('请填写所有必填字段。',true);return}
-  $('submit').disabled=true;message('正在提交…');
-  try{await api('add',data);$('form').reset();message('提交成功。');try{await refresh()}catch(error){message('提交已成功，但列表刷新失败：'+error.message,true)}}catch(error){message(error.message,true)}finally{$('submit').disabled=false}
-});
-$('search').addEventListener('input',render);
-$('refresh').addEventListener('click',()=>{message('');refresh().catch(error=>message(error.message,true))});
-render();refresh().catch(error=>message(error.message,true));
-</script></body></html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>信息空间</title><link rel="stylesheet" href="/styles.css"><script src="/fields.js" defer></script><script src="/app.js" defer></script></head><body>
+<header><div class="nav"><a class="brand" href="/" aria-label="信息空间首页"><span class="logo"><svg viewBox="0 0 64 64" fill="none"><path d="M8 28 55 9 39 54 29 35 8 28Z" stroke="currentColor" stroke-width="2"/><path d="m29 35 26-26-17 23 1 22" stroke="currentColor" stroke-width="1.5"/></svg></span><span class="name">信息空间</span></a><nav aria-label="主导航"><button data-page="submit">提交信息</button><button data-page="list">数据列表</button></nav><div class="right"><button class="theme-toggle" id="themeToggle" type="button" aria-label="切换为日间主题">☀ 日间</button><span class="live" id="serviceState">信息登记服务</span></div></div></header>
+<main><p id="feedback" class="feedback" role="status" aria-live="polite" hidden></p><div class="heading"><div><p class="eyebrow" id="eyebrow">INFORMATION / COLLECT</p><h1 id="title">让每一条信息，有序抵达。</h1><p class="lead" id="lead">轻松登记，随时查阅。让信息收集与管理更简单。</p></div><span class="badge" id="badge">✦ 简单填写 · 即刻提交</span></div>
+<div id="submitPage" class="layout"><section class="panel form-panel"><div class="panel-title"><div class="icon">＋</div><div><h2>提交新信息</h2><p class="caption">请填写以下内容，带 * 的为必填项</p></div><span class="number">FORM / 01</span></div><form id="submitForm"><div class="fields" id="fields"></div><div class="form-bottom"><span class="quiet">ⓘ 提交前请确认信息填写无误</span><button class="primary" type="submit" id="submitButton">提交信息 <span style="margin-left:22px">↗</span></button></div></form></section><aside class="aside"><div class="panel visual"><svg viewBox="0 0 180 145" fill="none"><path d="m22 65 129-45-38 112-27-54-64-13Z" fill="#90a4ff0d" stroke="#a4b3ff" stroke-width="1.5"/><path d="m86 78 65-58-47 52 9 60" stroke="#a4b3ff"/><path d="M22 65 104 72" stroke="#8191db"/><path d="m23 111 15-3m4 14 27-7m-7 20 12-3" stroke="#8397da66" stroke-linecap="round"/></svg><p>每一次提交，都是一次连接。</p></div><div class="panel notes"><h3>填写小贴士</h3><div class="note"><span class="tick">✓</span><span>姓名和联系电话均需填写</span></div><div class="note"><span class="tick">✓</span><span>提交后可在数据列表中查阅</span></div><div class="note"><span class="tick">✓</span><span>如需更正，请联系管理员处理</span></div></div></aside></div>
+<div id="dataPage" hidden><div id="adminBanner" class="admin-banner" hidden>ⓘ 当前管理页面无需登录，任何获得地址的人均可新增、修改或删除数据。</div><div id="stats" class="stats" hidden><div class="panel stat"><div class="label">全部记录</div><div class="value" id="statCount">6</div></div><div class="panel stat"><div class="label">当前展示</div><div class="value" id="statVisible">6</div></div><div class="panel stat"><div class="label">管理权限</div><div class="value small">新增 / 编辑 / 删除</div></div></div><section class="panel table-panel"><div class="toolbar"><div class="search"><input id="search" aria-label="搜索姓名或电话" type="search" placeholder="搜索姓名或联系电话…"></div><span class="total">共 <b id="count">6</b> 条信息</span><div class="tools"><button class="secondary" id="refresh">↻ 刷新</button><button class="primary" id="add" hidden>＋ 新增信息</button></div></div><div class="scroll"><table><thead><tr id="tableHead"></tr></thead><tbody id="rows"></tbody></table></div><div id="empty" class="empty" hidden>没有找到匹配的信息，试试其他关键词。</div><div class="table-foot"><span id="footCount">已展示全部信息</span><span id="tableNote">普通页面仅支持查看和新增</span></div></section></div>
+<footer><span>信息空间 <span style="color:#33425a;margin:0 10px">/</span> INFORMATION</span><span>让信息流动，让连接发生。</span></footer></main>
+<dialog id="editDialog"><form id="editForm"><h2 id="dialogTitle">编辑信息</h2><p class="caption">请确认信息准确后保存。</p><div id="editFields"></div><p id="editError" class="feedback error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="secondary" data-close="editDialog">取消</button><button type="submit" class="primary" id="editSave">保存信息</button></div></form></dialog>
+<dialog id="deleteDialog"><h2>确认删除这条信息？</h2><p class="quiet">即将删除 <strong class="delete-name" id="deleteName"></strong> 的登记信息，此操作无法撤销。</p><p id="deleteError" class="feedback error" role="alert" hidden></p><div class="dialog-actions"><button class="secondary" data-close="deleteDialog">取消</button><button class="delete-button" id="confirmDelete">确认删除</button></div></dialog><div class="toast" role="status" aria-live="polite" id="toast" hidden></div>
+</body></html>
