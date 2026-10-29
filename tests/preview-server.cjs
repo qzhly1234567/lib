@@ -1,27 +1,14 @@
-// 本地 UI 验证专用：真实 API 适配器 + 内存 SeaTable 替身。绝不连接真实数据。
+// 本地真实服务预览：仅从进程环境读取凭证，不注入模拟数据。
 'use strict';
 const http = require('node:http');
-const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
-const { EventEmitter } = require('node:events');
 const origin = 'http://127.0.0.1:8766';
-Object.assign(process.env, { ALLOWED_ORIGIN: origin, SEATABLE_API_TOKEN: 'local-test-only', SEATABLE_BASE_UUID: 'local-base', SEATABLE_TABLE_NAME: '信息登记' });
-let rows = [{ _id: 'abcdefghijklmnopqrstuv', 姓名: '本地演示记录', 电话: '00000000000' }], nextId = 1;
-https.request = (url, options, callback) => {
-  const req = new EventEmitter();
-  req.end = raw => setImmediate(() => {
-    let data = raw ? JSON.parse(raw) : null, result;
-    if (String(url).includes('app-access-token')) result = { access_token: 'local-temporary', dtable_uuid: 'local-base' };
-    else if (options.method === 'POST') { for (const row of data.rows) rows.push({ ...row, _id: String(nextId++).padStart(22, '0') }); result = { success: true }; }
-    else if (options.method === 'PUT') { for (const update of data.updates) Object.assign(rows.find(r => r._id === update.row_id) || {}, update.row); result = { success: true }; }
-    else if (options.method === 'DELETE') { rows = rows.filter(r => !data.row_ids.includes(r._id)); result = { success: true }; }
-    else result = { rows };
-    const res = new EventEmitter(); res.statusCode = 200; res.setEncoding = () => {}; callback(res); res.emit('data', JSON.stringify(result)); res.emit('end'); req.emit('close');
-  });
-  req.destroy = error => { req.emit('error', error); req.emit('close'); };
-  return req;
-};
+if (!process.env.SEATABLE_API_TOKEN || !process.env.SEATABLE_BASE_UUID) {
+  console.error('请通过环境变量设置 SEATABLE_API_TOKEN 和 SEATABLE_BASE_UUID，预览服务不会使用模拟数据。');
+  process.exit(1);
+}
+process.env.ALLOWED_ORIGIN = origin;
 const handlers = { '/api/data': require('../api/data'), '/api/admin': require('../api/admin') };
 http.createServer(async (req, res) => {
   const pathname = new URL(req.url, origin).pathname;
@@ -39,4 +26,4 @@ http.createServer(async (req, res) => {
     const data = fs.readFileSync(file);
     res.setHeader('Content-Type', file.endsWith('.js') ? 'application/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8'); res.end(data);
   } catch { res.writeHead(404); res.end('Not found'); }
-}).listen(8766, '127.0.0.1', () => console.log('本地隔离预览：http://127.0.0.1:8766（模拟数据，不连接 SeaTable）'));
+}).listen(8766, '127.0.0.1', () => console.log('本地真实预览：http://127.0.0.1:8766（连接 SeaTable）'));

@@ -3,10 +3,10 @@
   "outputDirectory": "public",
   "functions": {
     "api/data.js": {
-      "maxDuration": 10
+      "maxDuration": 30
     },
     "api/admin.js": {
-      "maxDuration": 10
+      "maxDuration": 30
     }
   },
   "rewrites": [
